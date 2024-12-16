@@ -1,64 +1,96 @@
 import cv2
 import numpy as np
 import sounddevice as sd
+import threading
 
-# ฟังก์ชันสำหรับสร้างเสียงโน้ต
-def play_note(frequency, duration):
-    sample_rate = 44100  # ความถี่การสุ่มเสียง
-    t = np.linspace(0, duration, int(sample_rate * duration), endpoint=False)
-    sound = 0.5 * np.sin(2 * np.pi * frequency * t)
-    sd.play(sound, samplerate=sample_rate)
-    sd.wait()
+# กำหนดความถี่ของเสียงโน๊ต
+NOTES = {
+    "brown": 261.63,   # โด (C4)
+    "blue": 293.66,    # เร (D4)
+    "green": 329.63,   # มี (E4)
+    "red": 349.23,     # ฟา (F4)
+    "yellow": 392.00,  # ซอล (G4)
+    "pink": 440.00,    # ลา (A4)
+    "purple": 493.88   # ที (B4)
+}
 
-# ฟังก์ชันสำหรับตรวจจับสีและการเล่นเสียง
-def detect_color_and_play(frame, last_played_color):
-    # แปลงภาพจาก BGR เป็น HSV
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+# ฟังก์ชันสำหรับเล่นเสียง
+def play_sound(frequency, duration=0.5, sample_rate=44100):
+    t = np.linspace(0, duration, int(sample_rate * duration), endpoint=False)  # สร้างช่วงเวลา
+    wave = 0.5 * np.sin(2 * np.pi * frequency * t)  # สร้างคลื่นเสียงโดยใช้ sine wave
+    sd.play(wave, samplerate=sample_rate)  # เล่นคลื่นเสียง
+    sd.wait()  # รอจนกว่าเสียงจะเล่นเสร็จ
 
-    # กำหนดขอบเขตสีที่ต้องการตรวจจับ (สีต่าง ๆ ตามที่กำหนด)
+# ฟังก์ชันสำหรับตรวจจับสีในภาพ
+def detect_colors(frame):
+    hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)  # แปลงภาพจาก BGR เป็น HSV
+    detected_colors = []  # ลิสต์สำหรับเก็บสีที่ตรวจจับได้
+
+    # กำหนดช่วงสีใน HSV สำหรับแต่ละสี
     color_ranges = {
-        "red": ([0, 120, 70], [10, 255, 255], 261.63),  # โด
-        "orange": ([10, 120, 70], [25, 255, 255], 293.66),  # เร
-        "green": ([35, 100, 100], [85, 255, 255], 329.63),  # มี
-        "yellow": ([20, 100, 100], [35, 255, 255], 349.23),  # ฟา
-        "blue": ([90, 100, 100], [140, 255, 255], 392.00),  # ซอล
-        "light_blue": ([80, 100, 100], [130, 255, 255], 440.00),  # ลา
-        "purple": ([140, 100, 100], [170, 255, 255], 466.16),  # ที
+        "brown": [(10, 100, 20), (20, 255, 200)],  # ช่วงสีน้ำตาล
+        "blue": [(90, 50, 50), (130, 255, 255)],   # ช่วงสีฟ้า
+        "green": [(35, 50, 50), (85, 255, 255)],   # ช่วงสีเขียว
+        "red": [(0, 120, 70), (10, 255, 255)],     # ช่วงสีแดง
+        "yellow": [(26, 100, 100), (35, 255, 255)],  # ช่วงสีเหลือง
+        "pink": [(145, 50, 50), (170, 255, 255)],  # ช่วงสีชมพู
+        "purple": [(140, 50, 50), (160, 255, 255)]  # ช่วงสีม่วง
     }
 
-    # ตรวจสอบว่าไม่มีสีใดๆ ถูกตรวจพบ
-    for color, (lower, upper, frequency) in color_ranges.items():
-        mask = cv2.inRange(hsv, np.array(lower), np.array(upper))
+    # ตรวจจับสีที่อยู่ในช่วงที่กำหนด
+    for color, (lower, upper) in color_ranges.items():
+        mask = cv2.inRange(hsv_frame, np.array(lower), np.array(upper))  # สร้างหน้ากากสี
+        if cv2.countNonZero(mask) > 0:  # ถ้ามีพิกเซลที่ตรงกับสี
+            detected_colors.append(color)  # เพิ่มสีที่ตรวจพบลงในลิสต์
 
-        if np.sum(mask) > 10000:  # ถ้าพบสีนี้ในภาพ
-            if color != last_played_color:  # ถ้าไม่เคยเล่นสีนี้ล่าสุด
-                play_note(frequency, 1)  # เล่นเสียงโน้ต
-                return color  # ส่งคืนสีที่เล่นเสียงไปแล้ว
-    
-    # หากไม่พบสีที่กำหนดเลย ไม่ต้องเล่นเสียง
-    return last_played_color  # หากไม่พบสีใหม่ ให้คงสีเดิม
+    return detected_colors  # ส่งคืนลิสต์สีที่ตรวจจับได้
 
-# เปิดกล้องเว็บแคม
-cap = cv2.VideoCapture(0)
+# ฟังก์ชันสำหรับเปิดกล้อง USB
+def open_usb_camera():
+    cap = cv2.VideoCapture(1)  # เปิดกล้องที่มี index = 1
+    if not cap.isOpened():  # ตรวจสอบว่าเปิดกล้องได้หรือไม่
+        print("ไม่สามารถเปิดกล้อง USB ที่ index 1")  # ถ้าไม่สามารถเปิดได้
+        exit()  # หยุดโปรแกรม
+    return cap  # คืนค่ากล้องที่เปิดใช้งานแล้ว
 
-# ตัวแปรเก็บสีที่เล่นเสียงล่าสุด
-last_played_color = None
+# ฟังก์ชันสำหรับเล่นเสียงหลายๆ ตัวพร้อมกัน
+def play_sounds_concurrently(colors):
+    threads = []  # ลิสต์สำหรับเก็บ thread
+    for color in colors:
+        if color in NOTES:  # ตรวจสอบว่าในลิสต์สีที่พบ มีสีที่กำหนดไว้ใน NOTES หรือไม่
+            thread = threading.Thread(target=play_sound, args=(NOTES[color], 0.5))  # สร้าง thread เพื่อเล่นเสียง
+            threads.append(thread)  # เพิ่ม thread ลงในลิสต์
+            thread.start()  # เริ่มต้น thread
+    for thread in threads:  # รอให้ทุก thread เสร็จสิ้น
+        thread.join()
+
+# เริ่มการตรวจจับด้วยกล้อง
+cap = open_usb_camera()
+
+# ปรับตั้งค่าของกล้องเพื่อลด delay
+cap.set(cv2.CAP_PROP_FPS, 50)  # ตั้งค่าความเร็วในการจับภาพเป็น 50 เฟรมต่อวินาที
+cap.set(cv2.CAP_PROP_BUFFERSIZE, 3)  # จำกัดจำนวนเฟรมใน buffer เป็น 3 เพื่อลดการหน่วง
 
 while True:
-    ret, frame = cap.read()
-    if not ret:
-        break
+    ret, frame = cap.read()  # อ่านภาพจากกล้อง
+    if not ret:  # ถ้าไม่สามารถอ่านภาพได้
+        print("ไม่สามารถอ่านภาพจากกล้องได้")  # แสดงข้อความผิดพลาด
+        continue  # ไปทำงานในลูปถัดไป
 
-    # ตรวจจับสีและเล่นเสียง
-    last_played_color = detect_color_and_play(frame, last_played_color)
+    # ย่อขนาดเฟรมเพื่อลดการใช้ทรัพยากร
+    frame = cv2.resize(frame, (640, 480))  # เปลี่ยนขนาดภาพให้มีความกว้าง 640px และสูง 480px
 
-    # แสดงผลภาพจากกล้อง
+    # ตรวจจับสีในเฟรม
+    colors = detect_colors(frame)
+
+    # หากพบสีที่ตรวจจับได้ ให้เล่นเสียงโน๊ตตามสี
+    if colors:
+        print(f"สี: {', '.join(colors)}")  # แสดงสีที่ตรวจพบ
+        play_sounds_concurrently(colors)  # เล่นเสียงพร้อมกัน
+
+    # แสดงภาพจากกล้อง
     cv2.imshow("Frame", frame)
 
-    # กด 'q' เพื่อออกจากโปรแกรม
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
-
-# ปิดการเชื่อมต่อกล้องและหน้าต่าง
-cap.release()
-cv2.destroyAllWindows()
+# ปิดกล้องและหน้าต่าง
+cap.release()  # ปิดการเชื่อมต่อกับกล้อง
+cv2.destroyAllWindows()  # ปิดหน้าต่างที่แสดงภาพ
