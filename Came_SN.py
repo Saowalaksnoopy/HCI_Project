@@ -21,13 +21,13 @@ def detect_colors_in_frame(frame, last_color, last_color_time, hold_duration=0.5
 
     # Define colors and their HSV ranges + sound frequencies
     color_ranges = {
-        "red": ([0, 120, 100], [10, 255, 255], 293.66),  # Red (0-10 degrees)
-        "green": ([35, 50, 50], [85, 255, 255], 349.23),  # Green (35-85 degrees)
-        "blue": ([90, 50, 50], [130, 255, 255], 392.00),  # Blue (90-130 degrees)
-        "yellow": ([20, 100, 100], [40, 255, 255], 329.63),  # Yellow (20-40 degrees)
-        "purple": ([140, 50, 50], [160, 255, 255], 440.00),  # Purple (140-160 degrees)
-        "brown": ([10, 40, 50], [30, 255, 200], 493.88),  # Brown (10-30 degrees)
-        "black": ([0, 0, 0], [180, 255, 50], 261.63)  # Black (Low saturation and low value)
+        "red": ([[[0, 120, 100], [10, 255, 255]], [[170, 120, 100], [180, 255, 255]]], 293.66),  # Red (two ranges)
+        "green": ([[[35, 50, 50], [85, 255, 255]]], 349.23),  # Green (35-85 degrees)
+        "blue": ([[[90, 50, 50], [130, 255, 255]]], 392.00),  # Blue (90-130 degrees)
+        "yellow": ([[[20, 100, 100], [40, 255, 255]]], 329.63),  # Yellow (20-40 degrees)
+        "white": ([[[0, 0, 200], [180, 55, 255]]], 440.00),  # White (low Saturation, high Value)
+        "orange": ([[[10, 100, 100], [25, 255, 255]]], 493.88),  # Orange (10-25 degrees)
+        "black": ([[[0, 0, 0], [180, 255, 50]]], 261.63)  # Black (Low saturation and low value)
     }
 
     current_time = time.time()
@@ -37,8 +37,11 @@ def detect_colors_in_frame(frame, last_color, last_color_time, hold_duration=0.5
     # Reduce Noise and improve detection accuracy
     blurred_frame = cv2.GaussianBlur(hsv, (5, 5), 0)
 
-    for color, (lower, upper, frequency) in color_ranges.items():
-        mask = cv2.inRange(blurred_frame, np.array(lower), np.array(upper))
+    for color, (ranges, frequency) in color_ranges.items():
+        mask = None
+        for lower, upper in ranges:  # Iterate through multiple HSV ranges for each color
+            temp_mask = cv2.inRange(blurred_frame, np.array(lower), np.array(upper))
+            mask = temp_mask if mask is None else cv2.bitwise_or(mask, temp_mask)
 
         # Reduce Noise in Mask
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
@@ -65,14 +68,17 @@ def detect_colors_in_frame(frame, last_color, last_color_time, hold_duration=0.5
     # If no new color detected, retain the previous color
     return last_color, last_color_time, highlighted_frame
 
+# 📹 ฟังก์ชันสำหรับเปิดกล้อง USB
+def open_usb_camera():
+    cap = cv2.VideoCapture(1)  # เปิดกล้องที่มี index = 1
+    if not cap.isOpened():  # ตรวจสอบว่าเปิดกล้องได้หรือไม่
+        print("ไม่สามารถเปิดกล้อง USB ที่ index 1")  # ถ้าไม่สามารถเปิดได้
+        exit()  # หยุดโปรแกรม
+    return cap  # คืนค่ากล้องที่เปิดใช้งานแล้ว
+
 # 👁 Main Function to Process Live Video
 def main():
-    cap = cv2.VideoCapture(0)
-
-    # Check if the camera opened successfully
-    if not cap.isOpened():
-        print("Error: Could not open video stream.")
-        return
+    cap = open_usb_camera()  # ใช้ฟังก์ชันสำหรับเปิดกล้อง USB
 
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
